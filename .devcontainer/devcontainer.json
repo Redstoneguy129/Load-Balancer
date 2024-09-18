@@ -1,0 +1,24 @@
+{
+    "name": "Elixir",
+    "build":{
+      "dockerfile": "Dockerfile",
+      "context": ".."
+    },
+  
+    "appPort": ["127.0.0.1:8080:8080"],
+  
+    "postCreateCommand": "",
+  
+    "overrideCommand": false,
+    "remoteUser": "vscode",
+    "runArgs": ["--init", "--network=host"],
+    "mounts": [ "source=//var/run/docker.sock,target=/var/run/docker-host.sock,type=bind" ],
+    "extensions": [
+      "editorconfig.editorconfig",
+      "github.vscode-pull-request-github",
+      "jakebecker.elixir-ls",
+      "redhat.vscode-yaml",
+      "ms-azuretools.vscode-docker"
+    ]
+  }
+  
