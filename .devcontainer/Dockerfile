@@ -1,71 +1,43 @@
-FROM elixir:1.17.2
+# Update the VARIANT arg in docker-compose.yml to pick an Elixir version: 1.9, 1.10, 1.10.4
+ARG VARIANT="1.17.2"
+FROM elixir:${VARIANT}
 
-# Avoid warnings by switching to noninteractive
-ENV DEBIAN_FRONTEND=noninteractive
-
-# This Dockerfile adds a non-root user with sudo access. Use the "remoteUser"
-# property in devcontainer.json to use it. On Linux, the container user's GID/UIDs
-# will be updated to match your local UID/GID (when using the dockerFile property).
-# See https://aka.ms/vscode-remote/containers/non-root-user for details.
+# This Dockerfile adds a non-root user with sudo access. Update the “remoteUser” property in
+# devcontainer.json to use it. More info: https://aka.ms/vscode-remote/containers/non-root-user.
 ARG USERNAME=vscode
-ARG NONROOT_USER=vscode
 ARG USER_UID=1000
 ARG USER_GID=$USER_UID
 
-# Install Docker CE CLI
+# Options for common package install script
+ARG INSTALL_ZSH="true"
+ARG UPGRADE_PACKAGES="true"
+ARG COMMON_SCRIPT_SOURCE="https://raw.githubusercontent.com/microsoft/vscode-dev-containers/main/script-library/common-debian.sh"
+ARG COMMON_SCRIPT_SHA="dev-mode"
+
+# Install needed packages and setup non-root user. Use a separate RUN statement to add your own dependencies.
 RUN apt-get update \
-    && apt-get install -y apt-transport-https ca-certificates curl gnupg2 lsb-release \
-    && curl -fsSL https://download.docker.com/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]')/gpg | apt-key add - 2>/dev/null \
-    && echo "deb [arch=amd64] https://download.docker.com/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]') $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list \
-    && apt-get update \
-    && apt-get install -y docker-ce-cli
+  && export DEBIAN_FRONTEND=noninteractive \
+  && apt-get -y install --no-install-recommends curl ca-certificates 2>&1 \
+  && curl -sSL ${COMMON_SCRIPT_SOURCE} -o /tmp/common-setup.sh \
+  && ([ "${COMMON_SCRIPT_SHA}" = "dev-mode" ] || (echo "${COMMON_SCRIPT_SHA} */tmp/common-setup.sh" | sha256sum -c -)) \
+  && /bin/bash /tmp/common-setup.sh "${INSTALL_ZSH}" "${USERNAME}" "${USER_UID}" "${USER_GID}" "${UPGRADE_PACKAGES}" \
+  # Install dependencies
+  && apt-get install -y build-essential inotify-tools \
+  #
+  # Clean up
+  && apt-get autoremove -y \
+  && apt-get clean -y \
+  && rm -rf /var/lib/apt/lists/* /tmp/common-setup.sh /tmp/node-setup.sh
 
-# Install Docker Compose
-RUN LATEST_COMPOSE_VERSION=$(curl -sSL "https://api.github.com/repos/docker/compose/releases/latest" | grep -o -P '(?<="tag_name": ").+(?=")') \
-    && curl -sSL "https://github.com/docker/compose/releases/download/${LATEST_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose \
-    && chmod +x /usr/local/bin/docker-compose
+RUN su ${USERNAME} -c "mix local.hex --force \
+  && mix local.rebar --force"
 
-# Configure apt and install packages
-# hadolint ignore=DL3008
-RUN apt-get update \
-    && apt-get -y install --no-install-recommends apt-utils dialog 2>&1 \
-    #
-     # Install bash tree
-    && apt-get -y install --no-install-recommends tree \
-    # Install git iproute2, procps, lsb-release (useful for CLI installs)
-    && apt-get -y install --no-install-recommends git iproute2 procps iproute2 lsb-release docker-ce-cli \
+# [Optional] Uncomment this section to install additional OS packages.
+# RUN apt-get update \
+#     && export DEBIAN_FRONTEND=noninteractive \
+#     && apt-get -y install --no-install-recommends <your-package-list-here>
 
-    # Create a non-root user to use if preferred - see https://aka.ms/vscode-remote/containers/non-root-user.
-    && groupadd --gid $USER_GID $USERNAME \
-    && useradd -s /bin/bash --uid $USER_UID --gid $USER_GID -m $USERNAME \
-    # [Optional] Add sudo support for the non-root user
-    && apt-get install -y sudo \
-    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME\
-    && chmod 0440 /etc/sudoers.d/$USERNAME \
-    #
+# [Optional] Uncomment this line to install additional package.
+# RUN  mix ...
 
-    # Clean up
-    && apt-get autoremove -y \
-    && apt-get clean -y \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN touch /var/run/docker-host.sock \
-    && ln -s /var/run/docker-host.sock /var/run/docker.sock \
-    && apt-get update \
-    && apt-get -y install socat
-
-RUN echo "#!/bin/sh\n\
-    sudoIf() { if [ \"\$(id -u)\" -ne 0 ]; then sudo \"\$@\"; else \"\$@\"; fi }\n\
-    sudoIf rm -rf /var/run/docker.sock\n\
-    ((sudoIf socat UNIX-LISTEN:/var/run/docker.sock,fork,mode=660,user=${NONROOT_USER} UNIX-CONNECT:/var/run/docker-host.sock) 2>&1 >> /tmp/vscr-docker-from-docker.log) & > /dev/null\n\
-    \"\$@\"" >> /usr/local/share/docker-init.sh \
-    && chmod +x /usr/local/share/docker-init.sh
-
-# Switch back to dialog for any ad-hoc use of apt-get
-ENV DEBIAN_FRONTEND=dialog
-
-USER vscode
-ENV HOME /home/vscode
-
-ENTRYPOINT [ "/usr/local/share/docker-init.sh" ]
 CMD [ "sleep", "infinity" ]
